@@ -10,7 +10,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 from google import genai
 from datetime import datetime
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AQ.Ab8RN6LLzq8kosXboOJOGfdnIefkPiu94B-Xhzw_J0lo2yrTRQ")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 HISTORY_FILE = "history.json"
 
 
