@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>SkillEdge - Resume Analysis</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+
+</head>
+
+<body>
+
+<nav>
+
+    <div class="logo">
+        Skill<span>Edge</span>
+    </div>
+
+    <div class="nav-links">
+
+        <a href="/">Home</a>
+
+        <a href="/interview">
+            AI Interview
+        </a>
+
+        <a href="/logout">
+            Logout
+        </a>
+         <button id="theme-toggle"
+                class="theme-toggle"
+                type="button"
+                aria-label="Toggle dark mode">
+
+            <svg id="theme-icon"
+                 width="20"
+                 height="20"
+                 viewBox="0 0 24 24"
+                 fill="none"
+                 stroke="currentColor"
+                 stroke-width="2">
+            </svg>
+
+        </button>
+
+    </div>
+
+</nav>
+
+
+<section class="results-page">
+
+    <div class="results-header">
+
+        <p class="small-title">
+            AI RESUME ANALYSIS
+        </p>
+
+        <h1>
+            Your Resume Insights
+        </h1>
+
+        <p>
+            A quick overview of what is working
+            and what you can improve.
+        </p>
+
+    </div>
+
+
+    <!-- SCORE -->
+
+    <div class="score-card">
+
+        <div>
+
+            <p>Resume Score</p>
+
+            <h2>
+                {{ result.score }}
+                <span>/100</span>
+            </h2>
+
+        </div>
+
+        <div class="score-message">
+
+            {% if result.score|int >= 80 %}
+
+                Excellent Resume
+
+            {% elif result.score|int >= 60 %}
+
+                Good Resume
+
+            {% else %}
+
+                Needs Improvement
+
+            {% endif %}
+
+        </div>
+
+    </div>
+
+
+    <div class="result-grid">
+
+
+        <!-- MISSING SKILLS -->
+
+        <div class="result-card">
+
+            <div class="card-icon">
+                +
+            </div>
+
+            <h2>
+                Technical Skills to Add
+            </h2>
+
+            <p class="card-description">
+                Skills that could improve your technical profile.
+            </p>
+
+            <ul>
+
+                {% for skill in result.missing_technical_skills %}
+
+                    <li>{{ skill }}</li>
+
+                {% endfor %}
+
+            </ul>
+
+        </div>
+
+
+        <!-- STRENGTHEN -->
+
+        <div class="result-card">
+
+            <div class="card-icon">
+                ↑
+            </div>
+
+            <h2>
+                Where to Strengthen
+            </h2>
+
+            <p class="card-description">
+                Areas that can make your resume stronger.
+            </p>
+
+            <ul>
+
+                {% for item in result.strengthen %}
+
+                    <li>{{ item }}</li>
+
+                {% endfor %}
+
+            </ul>
+
+        </div>
+
+
+        <!-- STRENGTHS -->
+
+        <div class="result-card">
+
+            <div class="card-icon">
+                ✓
+            </div>
+
+            <h2>
+                Your Strengths
+            </h2>
+
+            <p class="card-description">
+                Strong points identified in your resume.
+            </p>
+
+            <ul>
+
+                {% for item in result.strengths %}
+
+                    <li>{{ item }}</li>
+
+                {% endfor %}
+
+            </ul>
+
+        </div>
+
+
+        <!-- ROLES -->
+
+        <div class="result-card">
+
+            <div class="card-icon">
+                →
+            </div>
+
+            <h2>
+                Recommended Roles
+            </h2>
+
+            <p class="card-description">
+                Roles that match your current profile.
+            </p>
+
+            <ul>
+
+                {% for role in result.recommended_roles %}
+
+                    <li>{{ role }}</li>
+
+                {% endfor %}
+
+            </ul>
+
+        </div>
+
+
+    </div>
+
+
+    <div class="result-actions">
+
+        <a href="/" class="primary-button">
+            Analyze Another Resume
+        </a>
+
+        <a href="/interview" class="secondary-button">
+            Practice AI Interview
+        </a>
+
+    </div>
+
+</section>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+
+</body>
+
+</html>

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interview Result - SkillEdge</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .result-container {
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+
+        .status-badge-pass {
+            background: #dcfce7;
+            color: #15803d;
+            padding: 5px 14px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .status-badge-fail {
+            background: #fee2e2;
+            color: #b91c1c;
+            padding: 5px 14px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .section-label {
+            font-size: 14px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+            display: block;
+        }
+
+        .answer-box {
+            background: var(--background);
+            border: 1px solid var(--border);
+            padding: 14px;
+            border-radius: 10px;
+            font-family: Consolas, monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
+            margin-bottom: 18px;
+            color: var(--text);
+        }
+
+        .feedback-box {
+            background: rgba(99, 91, 255, 0.08);
+            border: 1px solid rgba(99, 91, 255, 0.25);
+            border-left: 4px solid var(--primary);
+            padding: 14px;
+            border-radius: 8px;
+            margin-bottom: 18px;
+            color: var(--text);
+            line-height: 1.5;
+        }
+
+        .solution-box {
+            background: #11141b;
+            color: #f4f5f7;
+            border: 1px solid #2c313c;
+            padding: 16px;
+            border-radius: 10px;
+            font-family: Consolas, "Courier New", monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
+            line-height: 1.6;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- NAVIGATION -->
+    <nav>
+        <div class="logo">
+            Skill<span>Edge</span>
+        </div>
+                <div class="nav-links">
+                    <a href="/">Resume Analyzer</a>
+                    <a href="/interview">AI Interview</a>
+                    <a href="/history">History</a>
+            <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark mode">
+                <svg id="theme-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2">
+                    <circle cx="12" cy="12" r="4"></circle>
+                </svg>
+            </button>
+        </div>
+    </nav>
+
+    <div class="result-container">
+
+        <!-- HEADER -->
+        <div class="results-header" style="text-align: center; margin-bottom: 35px;">
+            <p class="badge">INTERVIEW COMPLETED</p>
+            <h1 style="font-size: 38px; margin-top: 10px;">{{ interview_name }} Scorecard</h1>
+            <p style="color: var(--secondary-text); font-size: 16px;">
+                Here is your performance breakdown, evaluation feedback, and reference solutions.
+            </p>
+        </div>
+
+        <!-- OVERALL SCORE CARD -->
+        <div class="score-card">
+            <div>
+                <p style="color: var(--secondary-text); font-weight: 600;">Overall Score</p>
+                <h2 style="font-size: 54px; margin: 5px 0;">{{ percentage }}<span>%</span></h2>
+                <p style="font-size: 14px; color: var(--secondary-text);">Questions evaluated: {{ answers|length }} of
+                    {{ total }}</p>
+            </div>
+            <div class="score-message">
+                {% if percentage >= 75 %}
+                🎉 <strong>Strong Performance!</strong> You have demonstrated solid readiness for this round.
+                {% elif percentage >= 40 %}
+                ⚠️ <strong>Moderate Performance.</strong> Some answers were partially correct or need optimization.
+                {% else %}
+                ❌ <strong>Needs Improvement.</strong> Study the recommended solutions and explanations below.
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- QUESTION BY QUESTION REVIEW -->
+        <h2 style="margin: 40px 0 20px 0; font-size: 24px;">Question Breakdown & Solutions</h2>
+
+        <div style="display: flex; flex-direction: column; gap: 28px;">
+            {% for item in answers %}
+            <div class="feature-card" style="text-align: left; padding: 28px;">
+
+                <!-- TOP BAR: QUESTION NUMBER & BADGE -->
+                <div
+                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 10px;">
+                    <span style="font-weight: 700; color: var(--primary); font-size: 16px;">
+                        Question {{ loop.index }} of {{ total }}
+                    </span>
+
+                    {% if item.is_correct %}
+                    <span class="status-badge-pass">
+                        ✓ Correct ({{ item.score }}%)
+                    </span>
+                    {% else %}
+                    <span class="status-badge-fail">
+                        ✗ Needs Work ({{ item.score }}%)
+                    </span>
+                    {% endif %}
+                </div>
+
+                <!-- QUESTION TEXT -->
+                <h3 style="font-size: 18px; margin-bottom: 20px; line-height: 1.5; color: var(--text);">
+                    {{ item.question }}
+                </h3>
+
+                <!-- CANDIDATE'S ANSWER -->
+                <span class="section-label" style="color: var(--secondary-text);">Your Submitted Answer:</span>
+                <div class="answer-box">
+                    {{ item.user_answer if item.user_answer else 'No answer was provided.' }}
+                </div>
+
+                <!-- AI / EXPERT FEEDBACK -->
+                <span class="section-label" style="color: var(--primary);">Evaluation Feedback:</span>
+                <div class="feedback-box">
+                    {{ item.feedback }}
+                </div>
+
+                <!-- RECOMMENDED SOLUTION -->
+                <span class="section-label" style="color: #10b981;">Correct Solution / Model Answer:</span>
+                <div class="solution-box">
+                    {{ item.solution }}
+                </div>
+
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- ACTION BUTTONS -->
+        <div class="result-actions" style="display: flex; justify-content: center; gap: 15px; margin: 45px 0; flex-wrap: wrap;">
+            <a href="/interview" class="primary-button" style="text-decoration: none; padding: 14px 28px;">
+                Practice Another Interview
+            </a>
+            <a href="/history" class="secondary-button" style="text-decoration: none; padding: 14px 28px;">
+                View Performance History
+            </a>
+            <a href="/" class="secondary-button" style="text-decoration: none; padding: 14px 28px;">
+                Back to Resume Analyzer
+            </a>
+        </div>
+
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+
+</html>

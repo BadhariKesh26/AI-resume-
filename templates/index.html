@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>SkillEdge - AI Resume Analyzer</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+
+</head>
+
+
+<body>
+
+
+<!-- ================= NAVIGATION ================= -->
+
+<nav>
+
+    <div class="logo">
+        Skill<span>Edge</span>
+    </div>
+
+
+    <div class="nav-links">
+
+        <span>
+            Hi, {{ user_name }}
+        </span>
+
+        <a href="/">
+            Home
+        </a>
+
+        <a href="/interview">
+            AI Interview
+        </a>
+
+        <a href="/logout">
+            Logout
+        </a>
+
+
+        <!-- Dark / Light Mode -->
+
+        <button id="theme-toggle"
+                class="theme-toggle"
+                type="button"
+                aria-label="Toggle dark mode">
+
+            <svg id="theme-icon"
+                 width="20"
+                 height="20"
+                 viewBox="0 0 24 24"
+                 fill="none"
+                 stroke="currentColor"
+                 stroke-width="2">
+
+                <circle cx="12"
+                        cy="12"
+                        r="4">
+                </circle>
+
+                <path d="M12 2v2"></path>
+
+                <path d="M12 20v2"></path>
+
+                <path d="m4.93 4.93 1.41 1.41">
+                </path>
+
+                <path d="m17.66 17.66 1.41 1.41">
+                </path>
+
+                <path d="M2 12h2"></path>
+
+                <path d="M20 12h2"></path>
+
+                <path d="m6.34 17.66-1.41 1.41">
+                </path>
+
+                <path d="m19.07 4.93-1.41 1.41">
+                </path>
+
+            </svg>
+
+        </button>
+
+    </div>
+
+</nav>
+
+
+
+<!-- ================= HERO SECTION ================= -->
+
+<section class="hero">
+
+    <div class="hero-content">
+
+
+        <div class="badge">
+
+            AI POWERED CAREER ASSISTANT
+
+        </div>
+
+
+        <h1>
+
+            Level Up Your Career with
+
+            <span>SkillEdge</span>
+
+        </h1>
+
+
+        <p>
+
+            Analyze your resume, discover your strengths,
+            improve your ATS score, and practice interviews
+            with your AI-powered career assistant.
+
+        </p>
+
+
+
+        <!-- ================= RESUME UPLOAD ================= -->
+
+        <form action="/analyze"
+              method="POST"
+              enctype="multipart/form-data"
+              id="resume-form">
+
+
+            <label class="upload-box"
+                   for="resume">
+
+
+                <input type="file"
+                       name="resume"
+                       id="resume"
+                       accept=".pdf"
+                       required>
+
+
+                <!-- PDF ICON -->
+
+                <div class="upload-icon">
+
+                    <svg width="42"
+                         height="42"
+                         viewBox="0 0 24 24"
+                         fill="none"
+                         stroke="currentColor"
+                         stroke-width="1.8">
+
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z">
+                        </path>
+
+                        <polyline points="14 2 14 8 20 8">
+                        </polyline>
+
+                        <line x1="8"
+                              y1="13"
+                              x2="16"
+                              y2="13">
+                        </line>
+
+                        <line x1="8"
+                              y1="17"
+                              x2="13"
+                              y2="17">
+                        </line>
+
+                    </svg>
+
+                </div>
+
+
+                <h3 id="file-name">
+
+                    Upload your resume
+
+                </h3>
+
+
+                <p id="file-status">
+
+                    Click here to choose a PDF file
+
+                </p>
+
+
+            </label>
+
+
+
+            <button type="submit">
+
+                Analyze Resume →
+
+            </button>
+
+
+        </form>
+
+    </div>
+
+</section>
+
+
+
+<!-- ================= FEATURES ================= -->
+
+<section class="features">
+
+
+    <!-- RESUME SCORE -->
+
+    <div class="feature-card">
+
+
+        <div class="icon">
+
+            <svg width="38"
+                 height="38"
+                 viewBox="0 0 24 24"
+                 fill="none"
+                 stroke="currentColor"
+                 stroke-width="1.8">
+
+                <line x1="4"
+                      y1="19"
+                      x2="20"
+                      y2="19">
+                </line>
+
+                <line x1="7"
+                      y1="16"
+                      x2="7"
+                      y2="11">
+                </line>
+
+                <line x1="12"
+                      y1="16"
+                      x2="12"
+                      y2="7">
+                </line>
+
+                <line x1="17"
+                      y1="16"
+                      x2="17"
+                      y2="4">
+                </line>
+
+            </svg>
+
+        </div>
+
+
+        <h3>
+
+            Resume Score
+
+        </h3>
+
+
+        <p>
+
+            Get an AI-generated resume score
+            and detailed analysis.
+
+        </p>
+
+
+    </div>
+
+
+
+    <!-- ATS ANALYSIS -->
+
+    <div class="feature-card">
+
+
+        <div class="icon">
+
+            <svg width="38"
+                 height="38"
+                 viewBox="0 0 24 24"
+                 fill="none"
+                 stroke="currentColor"
+                 stroke-width="1.8">
+
+                <circle cx="11"
+                        cy="11"
+                        r="7">
+                </circle>
+
+                <path d="m20 20-4-4">
+                </path>
+
+                <path d="M8 11l2 2 4-4">
+                </path>
+
+            </svg>
+
+        </div>
+
+
+        <h3>
+
+            ATS Analysis
+
+        </h3>
+
+
+        <p>
+
+            Discover missing keywords and
+            improve ATS compatibility.
+
+        </p>
+
+
+    </div>
+
+
+
+    <!-- AI INTERVIEW -->
+
+    <div class="feature-card">
+
+
+        <div class="icon">
+
+            <svg width="38"
+                 height="38"
+                 viewBox="0 0 24 24"
+                 fill="none"
+                 stroke="currentColor"
+                 stroke-width="1.8">
+
+                <rect x="3"
+                      y="5"
+                      width="18"
+                      height="14"
+                      rx="3">
+                </rect>
+
+                <circle cx="9"
+                        cy="11"
+                        r="1">
+                </circle>
+
+                <circle cx="15"
+                        cy="11"
+                        r="1">
+                </circle>
+
+                <path d="M8 15c2 1.5 6 1.5 8 0">
+                </path>
+
+                <path d="M12 2v3">
+                </path>
+
+            </svg>
+
+        </div>
+
+
+        <h3>
+
+            AI Interview
+
+        </h3>
+
+
+        <p>
+
+            Practice realistic technical,
+            HR and behavioral interviews.
+
+        </p>
+
+
+    </div>
+
+
+</section>
+
+
+
+<!-- ================= FOOTER ================= -->
+
+<footer>
+
+    <p>
+
+        © 2026 SkillEdge — AI Career Assistant
+
+    </p>
+
+</footer>
+
+
+
+<!-- JAVASCRIPT -->
+
+<script src="{{ url_for('static', filename='script.js') }}">
+</script>
+
+
+</body>
+
+</html>

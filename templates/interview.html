@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>AI Interview - SkillEdge</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+
+</head>
+
+
+<body>
+
+
+<nav>
+
+    <div class="logo">
+        Skill<span>Edge</span>
+    </div>
+
+    <div class="nav-links">
+
+        <a href="/">
+            Resume Analyzer
+        </a>
+        <a href="/history">
+            History
+        </a>
+
+        <a href="/logout">
+            Logout
+        </a>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark mode">
+        
+            <svg id="theme-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        
+                <circle cx="12" cy="12" r="4"></circle>
+        
+            </svg>
+        
+        </button>
+
+
+    </div>
+
+</nav>
+
+
+
+<section class="hero">
+
+    <div class="hero-content">
+
+        <div class="badge">
+            AI INTERVIEW SESSION
+        </div>
+
+
+        <h1>
+            Choose Your
+            <span>Interview</span>
+        </h1>
+
+
+        <p>
+            Select the type of interview you want to practice.
+        </p>
+
+
+
+        <!-- INTERVIEW SELECTION -->
+
+        <div id="selection-section">
+
+            <div class="feature-card">
+
+                <h2>
+                    Technical Interview
+                </h2>
+
+                <p>
+                    Answer coding and programming questions.
+                </p>
+
+                <p>
+                    <strong>3 Coding Questions</strong>
+                    &nbsp; • &nbsp;
+                    <strong>60 Minutes</strong>
+                </p>
+
+                <button onclick="startInterview('technical')">
+                    Start Technical Interview
+                </button>
+
+            </div>
+
+
+
+            <div class="feature-card">
+
+                <h2>
+                    Aptitude Test
+                </h2>
+
+                <p>
+                    Test your logical, numerical and problem-solving skills.
+                </p>
+
+                <p>
+                    <strong>5 Questions</strong>
+                    &nbsp; • &nbsp;
+                    <strong>20 Minutes</strong>
+                </p>
+
+                <button onclick="startInterview('aptitude')">
+                    Start Aptitude Test
+                </button>
+
+            </div>
+
+
+
+            <div class="feature-card">
+
+                <h2>
+                    HR Interview
+                </h2>
+
+                <p>
+                    Practice professional HR and behavioral questions.
+                </p>
+
+                <p>
+                    <strong>10 Minutes</strong>
+                </p>
+
+                <button onclick="startInterview('hr')">
+                    Start HR Interview
+                </button>
+
+            </div>
+
+        </div>
+
+
+
+        <!-- INTERVIEW SECTION -->
+
+        <div id="interview-section"
+             style="display:none;">
+
+            <div class="feature-card">
+
+                <h2 id="round-title">
+                    Interview
+                </h2>
+
+
+                <h3 id="timer">
+                    Time: 00:00
+                </h3>
+
+
+                <p id="question-counter">
+                    Question
+                </p>
+
+
+                <h2 id="question">
+                    Loading question...
+                </h2>
+
+
+                <textarea id="answer" placeholder="Type your answer here..." style="
+                    width:100%;
+                    height:150px;
+                    margin-top:20px;
+                    padding:15px;
+                    border-radius:10px;
+                    border:1px solid var(--border);
+                    background:var(--surface);
+                    color:var(--text);
+                    box-sizing:border-box;
+                    ">
+                </textarea>
+
+                <br>
+                <br>
+
+
+                <button onclick="submitAnswer()">
+                    Submit Answer
+                </button>
+
+
+                <button
+                    onclick="terminateInterview()"
+                    style="margin-top:15px;">
+
+                    End Interview
+
+                </button>
+
+            </div>
+
+        </div>
+
+
+
+        <!-- COMPLETION SECTION -->
+
+        <div id="completion-section"
+             style="display:none;">
+
+            <div class="feature-card">
+
+                <h2>
+                    Interview Completed 🎉
+                </h2>
+
+                <p id="completion-message">
+                    You have completed the interview.
+                </p>
+
+                <button onclick="location.href='/'">
+                    Back to Resume Analyzer
+                </button>
+
+                <button onclick="location.reload()">
+                    Choose Another Interview
+                </button>
+
+            </div>
+
+        </div>
+
+
+
+        <!-- TERMINATED SECTION -->
+
+        <div id="terminated-section"
+             style="display:none;">
+
+            <div class="feature-card">
+
+                <h2>
+                    Interview Terminated
+                </h2>
+
+                <p>
+                    The interview was terminated because you
+                    switched tabs or left the interview window.
+                </p>
+
+                <button onclick="location.reload()">
+                    Start Again
+                </button>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</section>
+
+
+
+<script>
+
+    let currentQuestion = "";
+
+    let interviewType = "";
+
+    let currentQuestionNumber = 0;
+
+    let totalQuestions = 0;
+
+    let timerInterval = null;
+
+    let interviewActive = false;
+
+
+    /* =========================
+       START INTERVIEW
+    ========================= */
+
+    async function startInterview(type) {
+
+        const response = await fetch(
+            "/start-interview",
+            {
+                method: "POST",
+
+                headers: {
+                    "Content-Type":
+                        "application/json"
+                },
+
+                body: JSON.stringify({
+                    type: type
+                })
+            }
+        );
+
+        const data =
+            await response.json();
+
+        if (!data.success) {
+
+            alert(
+                data.error ||
+                "Unable to start interview."
+            );
+
+            return;
+        }
+
+        interviewType =
+            data.type;
+
+        totalQuestions =
+            data.questions;
+
+        currentQuestionNumber = 0;
+
+        interviewActive = true;
+
+
+        document.getElementById(
+            "selection-section"
+        ).style.display = "none";
+
+
+        document.getElementById(
+            "interview-section"
+        ).style.display = "block";
+
+
+        document.getElementById(
+            "round-title"
+        ).innerText =
+            data.name;
+
+
+        startTimer(
+            data.end_time
+        );
+
+
+        await generateQuestion();
+    }
+
+
+    /* =========================
+       TIMER
+    ========================= */
+
+    function startTimer(endTime) {
+
+        clearInterval(
+            timerInterval
+        );
+
+        function updateTimer() {
+
+            const remaining =
+                Math.max(
+                    0,
+                    Math.floor(
+                        endTime -
+                        Date.now() / 1000
+                    )
+                );
+
+
+            const minutes =
+                Math.floor(
+                    remaining / 60
+                );
+
+
+            const seconds =
+                remaining % 60;
+
+
+            document.getElementById(
+                "timer"
+            ).innerText =
+                "Time: " +
+                String(minutes)
+                    .padStart(2, "0") +
+                ":" +
+                String(seconds)
+                    .padStart(2, "0");
+
+
+            if (remaining <= 0) {
+
+                clearInterval(
+                    timerInterval
+                );
+
+                interviewActive = false;
+
+                window.location.href =
+                    "/interview-result";
+            }
+        }
+
+
+        updateTimer();
+
+
+        timerInterval =
+            setInterval(
+                updateTimer,
+                1000
+            );
+    }
+
+
+    /* =========================
+       GENERATE QUESTION
+    ========================= */
+
+       async function generateQuestion() {
+            if (!interviewActive) return;
+
+            const questionElement = document.getElementById("question");
+            questionElement.innerText = "Generating question...";
+            document.getElementById("answer").value = "";
+
+            // Safe check so it never crashes:
+            const nextBtn = document.getElementById("next-button");
+            if (nextBtn) {
+                nextBtn.style.display = "none";
+            }
+
+            try {
+                const response = await fetch("/generate-question", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" }
+                });
+
+                const data = await response.json();
+
+                if (data.completed || data.expired) {
+                    window.location.href = "/interview-result";
+                    return;
+                }
+
+                if (data.error) {
+                    alert(data.error);
+                    questionElement.innerText = "Error loading question.";
+                    return;
+                }
+
+                currentQuestion = data.question;
+                currentQuestionNumber = data.number;
+                totalQuestions = data.total;
+                questionElement.innerText = currentQuestion;
+
+                const counterEl = document.getElementById("question-counter");
+                if (counterEl) {
+                    counterEl.innerText = (totalQuestions > 0)
+                        ? `Question ${currentQuestionNumber} of ${totalQuestions}`
+                        : `HR Question ${currentQuestionNumber}`;
+                }
+            } catch (err) {
+                console.error("Network error:", err);
+                questionElement.innerText = "Failed to load question. Please check server connection.";
+            }
+        }
+
+    /* =========================
+       SUBMIT ANSWER
+    ========================= */
+
+    async function submitAnswer() {
+
+        const answer =
+            document.getElementById(
+                "answer"
+            ).value;
+
+
+        if (!answer.trim()) {
+
+            alert(
+                "Please enter your answer."
+            );
+
+            return;
+        }
+
+
+        const submitButton =
+            document.querySelector(
+                'button[onclick="submitAnswer()"]'
+            );
+
+
+        submitButton.disabled = true;
+
+        submitButton.innerText =
+            "Saving...";
+
+
+        const response =
+            await fetch(
+                "/submit-answer",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify({
+
+                        question:
+                            currentQuestion,
+
+                        answer:
+                            answer
+
+                    })
+                }
+            );
+
+
+        const data =
+            await response.json();
+
+
+        if (data.expired) {
+
+            window.location.href =
+                "/interview-result";
+
+            return;
+        }
+
+
+        if (data.error) {
+
+            alert(data.error);
+
+            submitButton.disabled =
+                false;
+
+            submitButton.innerText =
+                "Submit Answer";
+
+            return;
+        }
+
+
+        /* FINAL QUESTION */
+
+        if (data.finished) {
+
+            submitButton.innerText =
+                "Completed";
+
+            window.location.href =
+                "/interview-result";
+
+            return;
+        }
+
+
+        /*
+           Move directly to the next question.
+    
+           No feedback is displayed.
+        */
+
+        submitButton.disabled =
+            false;
+
+        submitButton.innerText =
+            "Submit Answer";
+
+
+        await generateQuestion();
+    }
+
+
+    /* =========================
+       END INTERVIEW
+    ========================= */
+
+    async function terminateInterview() {
+
+        if (!interviewActive) {
+            return;
+        }
+
+
+        interviewActive = false;
+
+
+        clearInterval(
+            timerInterval
+        );
+
+
+        await fetch(
+            "/terminate-interview",
+            {
+                method: "POST"
+            }
+        );
+
+
+        document.getElementById(
+            "selection-section"
+        ).style.display = "none";
+
+
+        document.getElementById(
+            "interview-section"
+        ).style.display = "none";
+
+
+        document.getElementById(
+            "terminated-section"
+        ).style.display = "block";
+    }
+
+
+    /* =========================
+       TAB SWITCH DETECTION
+    ========================= */
+
+    document.addEventListener(
+        "visibilitychange",
+        function () {
+
+            if (
+                document.hidden &&
+                interviewActive
+            ) {
+
+                terminateInterview();
+            }
+        }
+    );
+
+
+</script>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+
+</body>
+
+</html>
