@@ -46,6 +46,7 @@ def init_db():
     conn.commit()
 
     conn.close()
+init_db()
 
 
 def extract_resume_text(file):
@@ -135,42 +136,19 @@ Resume:
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-
     if request.method == "POST":
-
-        email = request.form["email"]
-
-        password = request.form["password"]
-
+        email = request.form.get("email", "").strip()
+        password = request.form.get("password", "").strip()
         conn = sqlite3.connect("users.db")
-
         cursor = conn.cursor()
-
-        cursor.execute(
-            "SELECT * FROM users WHERE email = ?",
-            (email,)
-        )
-
+        cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
         user = cursor.fetchone()
-
         conn.close()
-
-        if user and check_password_hash(
-            user[3],
-            password
-        ):
-
+        if user and check_password_hash(user[3], password):
             session["user_id"] = user[0]
-
             session["user_name"] = user[1]
-
-            return redirect(url_for("home"))
-
-        return render_template(
-            "login.html",
-            error="Invalid email or password."
-        )
-
+            return redirect("/")  # ✅ Safely redirects to home page without BuildError!
+        return render_template("login.html", error="Invalid email or password.")
     return render_template("login.html")
 
 
