@@ -10,7 +10,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 from google import genai
 from datetime import datetime
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 HISTORY_FILE = "history.json"
 
 
@@ -25,9 +25,7 @@ UPLOAD_FOLDER = 'uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True) 
 
-client = genai.Client(
-    api_key=os.getenv("GEMINI_API_KEY")
-)
+client = genai.Client(api_key=GEMINI_API_KEY)
 def init_db():
 
     conn = sqlite3.connect("users.db")
@@ -94,7 +92,7 @@ Resume:
 """
 
     response = client.models.generate_content(
-        model="gemini-3.1-flash-lite",
+        model="gemini-2.5-flash-lite",
         contents=prompt
     )
 
