@@ -10,11 +10,10 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 from google import genai
 from datetime import datetime
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-HISTORY_FILE = "history.json"
-
 
 load_dotenv()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+HISTORY_FILE = "history.json"
 
 app = Flask(__name__)
 app.secret_key = os.getenv(
@@ -92,7 +91,7 @@ Resume:
 """
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash-lite",
+        model="gemini-3.5-flash-lite",
         contents=prompt
     )
 
@@ -415,51 +414,27 @@ QUESTION_BANK = {
 # =============================================================
 def get_questions_for_round(round_type):
     """
-    Generates fresh, unique questions using Gemini Flash in one fast batch (<2s).
-    If API key is missing or offline, immediately falls back to random bank.
+    Get interview questions instantly from the local question bank.
+    No Gemini API call is made when starting the interview.
     """
-    count_map = {"technical": 3, "aptitude": 5, "hr": 3}
+
+    count_map = {
+        "technical": 3,
+        "aptitude": 5,
+        "hr": 5
+    }
+
     num_to_generate = count_map.get(round_type.lower(), 3)
 
-    # 1. If Gemini API key is configured, generate with Gemini
-    if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY_HERE":
-        try:
-            client = genai.Client(api_key=GEMINI_API_KEY)
+    # Get questions from local question bank
+    pool = QUESTION_BANK.get(
+        round_type.lower(),
+        QUESTION_BANK["technical"]
+    )
 
-            # Strict prompt instructing Gemini to return clean JSON
-            prompt = f"""
-            You are an expert interviewer. Generate exactly {num_to_generate} unique, realistic {round_type.upper()} interview questions with detailed reference solutions.
-            
-            Return ONLY a valid JSON array of objects without markdown formatting or code blocks:
-            [
-              {{
-                "question": "Question text here",
-                "solution": "Step by step correct solution / code here",
-                "keywords": ["keyword1", "keyword2"],
-                "expected_answers": ["exact_answer_if_aptitude"]
-              }}
-            ]
-            """
-
-            # gemini-2.5-flash responds in ~1.5 seconds!
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt
-            )
-
-            cleaned_json = response.text.strip().replace("```json", "").replace("```", "").strip()
-            ai_questions = json.loads(cleaned_json)
-
-            if isinstance(ai_questions, list) and len(ai_questions) >= num_to_generate:
-                print(f"✅ Generated {len(ai_questions)} fresh questions from Gemini!")
-                return ai_questions[:num_to_generate]
-
-        except Exception as e:
-            print(f"⚠️ Gemini API fallback to local bank due to: {e}")
-
-    # 2. Instant Fallback if offline or without API key
-    pool = QUESTION_BANK.get(round_type.lower(), QUESTION_BANK["technical"])
+    # Select required number of questions
     sample_count = min(num_to_generate, len(pool))
+
     return random.sample(pool, sample_count)
 
 

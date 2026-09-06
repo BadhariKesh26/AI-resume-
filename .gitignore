@@ -4,3 +4,4 @@ __pycache__/
 uploads/
 users.db
 *.pyc
+history.json
