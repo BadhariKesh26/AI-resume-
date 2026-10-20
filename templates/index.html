@@ -410,11 +410,76 @@
 
 
 
+<!-- High-Speed AI Resume Analysis Overlay -->
+<div id="analysis-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(10, 15, 29, 0.88); backdrop-filter:blur(8px); z-index:9999; align-items:center; justify-content:center; flex-direction:column; color:#fff; text-align:center; padding:20px; box-sizing:border-box;">
+    <div style="background:var(--surface, #1e2433); border:1px solid var(--border, #2d3748); border-radius:18px; padding:35px 30px; max-width:440px; width:90%; box-shadow:0 20px 40px rgba(0,0,0,0.4);">
+        <!-- Animated Scanner Ring -->
+        <div style="width:70px; height:70px; margin:0 auto 20px; border:4px solid rgba(99, 91, 255, 0.2); border-top-color:#635bff; border-radius:50%; animation:spinRing 0.9s linear infinite;"></div>
+        
+        <h2 style="font-size:22px; margin:0 0 10px 0; color:#fff;">Analyzing Resume with AI</h2>
+        <p style="color:var(--secondary-text, #94a3b8); font-size:14px; margin-bottom:24px;">Extracting skills, evaluating ATS score &amp; insights...</p>
+        
+        <!-- Live Checklist Steps -->
+        <div style="text-align:left; background:rgba(0,0,0,0.25); border-radius:12px; padding:16px 20px; margin-bottom:20px; font-size:14px; line-height:2.2;">
+            <div id="step-1" style="color:#10b981;">✓ 1. Reading &amp; parsing PDF document</div>
+            <div id="step-2" style="color:#635bff; font-weight:600;">⚡ 2. Identifying technical competencies...</div>
+            <div id="step-3" style="color:#64748b;">○ 3. Calculating ATS compatibility score</div>
+            <div id="step-4" style="color:#64748b;">○ 4. Finalizing personalized scorecard</div>
+        </div>
+
+        <!-- Animated Progress Bar -->
+        <div style="width:100%; height:8px; background:rgba(255,255,255,0.1); border-radius:10px; overflow:hidden;">
+            <div id="scanner-progress" style="width:30%; height:100%; background:linear-gradient(90deg, #635bff, #06b6d4); border-radius:10px; transition:width 0.4s ease;"></div>
+        </div>
+    </div>
+</div>
+
+<style>
+@keyframes spinRing {
+    to { transform: rotate(360deg); }
+}
+</style>
+
 <!-- JAVASCRIPT -->
+<script src="{{ url_for('static', filename='script.js') }}"></script>
 
-<script src="{{ url_for('static', filename='script.js') }}">
+<!-- SkillEdge High-Speed Analyzer Loading Script -->
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const uploadForm = document.getElementById("resume-form") || document.querySelector("form[action='/analyze']");
+        const resumeInput = document.getElementById("resume");
+
+        if (uploadForm) {
+            uploadForm.addEventListener("submit", function () {
+                if (!resumeInput || !resumeInput.files || resumeInput.files.length === 0) {
+                    return;
+                }
+
+                const overlay = document.getElementById("analysis-overlay");
+                if (overlay) {
+                    overlay.style.display = "flex";
+                }
+
+                const step2 = document.getElementById("step-2");
+                const step3 = document.getElementById("step-3");
+                const step4 = document.getElementById("step-4");
+                const progress = document.getElementById("scanner-progress");
+
+                setTimeout(() => {
+                    if (progress) progress.style.width = "65%";
+                    if (step2) { step2.style.color = "#10b981"; step2.innerHTML = "✓ 2. Technical competencies identified"; }
+                    if (step3) { step3.style.color = "#635bff"; step3.style.fontWeight = "600"; step3.innerHTML = "⚡ 3. Calculating ATS score &amp; matches..."; }
+                }, 300);
+
+                setTimeout(() => {
+                    if (progress) progress.style.width = "95%";
+                    if (step3) { step3.style.color = "#10b981"; step3.innerHTML = "✓ 3. ATS score calculated"; }
+                    if (step4) { step4.style.color = "#10b981"; step4.style.fontWeight = "600"; step4.innerHTML = "✓ 4. Finalizing scorecard report..."; }
+                }, 700);
+            });
+        }
+    });
 </script>
-
 
 </body>
 

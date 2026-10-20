@@ -293,69 +293,68 @@
     ========================= */
 
     async function startInterview(type) {
-
-        const response = await fetch(
-            "/start-interview",
-            {
-                method: "POST",
-
-                headers: {
-                    "Content-Type":
-                        "application/json"
-                },
-
-                body: JSON.stringify({
-                    type: type
-                })
-            }
-        );
-
-        const data =
-            await response.json();
-
-        if (!data.success) {
-
-            alert(
-                data.error ||
-                "Unable to start interview."
-            );
-
-            return;
+        const clickedBtn = window.event ? window.event.target : null;
+        if (clickedBtn && clickedBtn.tagName === 'BUTTON') {
+            clickedBtn.disabled = true;
+            clickedBtn.innerText = "Starting...";
         }
 
-        interviewType =
-            data.type;
+        try {
+            const response = await fetch(
+                "/start-interview",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ type: type })
+                }
+            );
 
-        totalQuestions =
-            data.questions;
+            const data = await response.json();
 
-        currentQuestionNumber = 0;
+            if (!data.success) {
+                alert(data.error || "Unable to start interview.");
+                if (clickedBtn && clickedBtn.tagName === 'BUTTON') {
+                    clickedBtn.disabled = false;
+                    clickedBtn.innerText = "Start Interview";
+                }
+                return;
+            }
 
-        interviewActive = true;
+            interviewType = data.type;
+            totalQuestions = data.questions;
+            interviewActive = true;
 
+            document.getElementById("selection-section").style.display = "none";
+            document.getElementById("interview-section").style.display = "block";
+            document.getElementById("round-title").innerText = data.name;
 
-        document.getElementById(
-            "selection-section"
-        ).style.display = "none";
+            startTimer(data.end_time);
 
-
-        document.getElementById(
-            "interview-section"
-        ).style.display = "block";
-
-
-        document.getElementById(
-            "round-title"
-        ).innerText =
-            data.name;
-
-
-        startTimer(
-            data.end_time
-        );
-
-
-        await generateQuestion();
+            // Instantly render Question 1 from payload with 0ms delay
+            if (data.first_question) {
+                currentQuestion = data.first_question.question;
+                currentQuestionNumber = data.first_question.number;
+                totalQuestions = data.first_question.total;
+                document.getElementById("question").innerText = currentQuestion;
+                const counterEl = document.getElementById("question-counter");
+                if (counterEl) {
+                    counterEl.innerText = `Question ${currentQuestionNumber} of ${totalQuestions}`;
+                }
+                document.getElementById("answer").value = "";
+                document.getElementById("answer").focus();
+            } else {
+                await generateQuestion();
+            }
+        } catch (err) {
+            console.error("Error starting interview:", err);
+            alert("Error connecting to server. Please try again.");
+            if (clickedBtn && clickedBtn.tagName === 'BUTTON') {
+                clickedBtn.disabled = false;
+                clickedBtn.innerText = "Start Interview";
+            }
+        }
     }
 
 
@@ -566,33 +565,33 @@
 
 
         /* FINAL QUESTION */
-
         if (data.finished) {
-
-            submitButton.innerText =
-                "Completed";
-
-            window.location.href =
-                "/interview-result";
-
+            submitButton.innerText = "Completed 🎉";
+            window.location.href = "/interview-result";
             return;
         }
 
+        /* Instantly move to next question from response payload */
+        if (data.next_question) {
+            currentQuestion = data.next_question.question;
+            currentQuestionNumber = data.next_question.number;
+            totalQuestions = data.next_question.total;
 
-        /*
-           Move directly to the next question.
-    
-           No feedback is displayed.
-        */
+            document.getElementById("question").innerText = currentQuestion;
+            const counterEl = document.getElementById("question-counter");
+            if (counterEl) {
+                counterEl.innerText = `Question ${currentQuestionNumber} of ${totalQuestions}`;
+            }
+            document.getElementById("answer").value = "";
+            document.getElementById("answer").focus();
 
-        submitButton.disabled =
-            false;
-
-        submitButton.innerText =
-            "Submit Answer";
-
-
-        await generateQuestion();
+            submitButton.disabled = false;
+            submitButton.innerText = "Submit Answer";
+        } else {
+            submitButton.disabled = false;
+            submitButton.innerText = "Submit Answer";
+            await generateQuestion();
+        }
     }
 
 
@@ -661,7 +660,6 @@
 </script>
 
 <script src="{{ url_for('static', filename='script.js') }}"></script>
-
 </body>
 
 </html>
