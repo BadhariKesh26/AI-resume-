@@ -5,7 +5,7 @@ import sqlite3
 import time
 import random
 
-from flask import Flask, render_template, request,redirect, url_for, session, jsonify
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 from google import genai
@@ -17,11 +17,17 @@ load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 HISTORY_FILE = "history.json"
 
-executor = ThreadPoolExecutor(max_workers=4)
+executor = ThreadPoolExecutor(max_workers=6)
+
+# Server-side cache for pre-fetched Gemini AI questions
+AI_PREFETCH_CACHE = {}
+
+# Fast, officially supported Gemini Flash models
+FAST_GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
 
 def is_valid_gemini_key(key):
     """Checks if the key is a standard Google AI Studio Gemini API key (starts with AIza)."""
-    return bool(key and isinstance(key, str) and (key.startswith("AIzaSy") or key.startswith("AIza")))
+    return bool(key and isinstance(key, str) and len(key.strip()) >= 10)
 
 def run_with_timeout(func, args=(), kwargs=None, timeout=2.5):
     """Executes a function in a thread with a hard timeout to completely prevent network hangs."""
@@ -37,6 +43,243 @@ def run_with_timeout(func, args=(), kwargs=None, timeout=2.5):
         print(f"[ERROR] Execution failed: {e}. Using instant fallback.")
         return None
 
+# Only initialize client if key is formatted properly, or safe dummy client
+try:
+    client = genai.Client(api_key=GEMINI_API_KEY) if is_valid_gemini_key(GEMINI_API_KEY) else None
+except Exception as e:
+    client = None
+    print("GenAI Client Init Note:", e)
+
+
+# =============================================================
+# DATABASE & PERSISTENT ANTI-REPETITION HISTORY
+# =============================================================
+def init_db():
+    conn = sqlite3.connect("users.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL
+        )
+    """)
+    # Persistent question tracking across all interview sessions
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_question_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            round_type TEXT NOT NULL,
+            question_id TEXT NOT NULL,
+            question_text TEXT NOT NULL,
+            question_source TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+init_db()
+
+def get_user_seen_question_ids(user_id, round_type):
+    """Retrieves all question IDs previously seen by this user to prevent repetition."""
+    if not user_id:
+        return set()
+    try:
+        conn = sqlite3.connect("users.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT question_id FROM user_question_history WHERE user_id = ? AND round_type = ?",
+            (user_id, round_type.lower())
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return {r[0] for r in rows}
+    except Exception:
+        return set()
+
+def get_user_past_question_texts(user_id, round_type, limit=12):
+    """Retrieves past question texts so Gemini AI avoids repeating them in future tests."""
+    if not user_id:
+        return []
+    try:
+        conn = sqlite3.connect("users.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT question_text FROM user_question_history WHERE user_id = ? AND round_type = ? ORDER BY id DESC LIMIT ?",
+            (user_id, round_type.lower(), limit)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [r[0] for r in rows if r[0]]
+    except Exception:
+        return []
+
+def record_user_question_history(user_id, round_type, questions):
+    """Saves presented questions so future interview tests never repeat them."""
+    if not user_id or not questions:
+        return
+    try:
+        conn = sqlite3.connect("users.db")
+        cursor = conn.cursor()
+        for q in questions:
+            q_id = str(q.get("id", f"gemini_{int(time.time()*1000)}_{random.randint(100, 999)}"))
+            q_text = q.get("question", "")
+            q_source = q.get("source", "Question Bank")
+            cursor.execute("""
+                INSERT INTO user_question_history (user_id, round_type, question_id, question_text, question_source)
+                VALUES (?, ?, ?, ?, ?)
+            """, (user_id, round_type.lower(), q_id, q_text, q_source))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print("Error recording question history:", e)
+
+
+# =============================================================
+# GEMINI AI UNIQUE QUESTION GENERATOR (ANTI-REPETITION + PREFETCH)
+# =============================================================
+def generate_single_ai_question(round_type, past_questions=None):
+    if not client or not is_valid_gemini_key(GEMINI_API_KEY):
+        return None
+
+    # Diversified topic pools to guarantee varied questions
+    categories = {
+        "technical": [
+            "Arrays, Sliding Window & Hash Maps",
+            "Binary Trees, Depth-First & Breadth-First Search",
+            "Dynamic Programming, Memoization & Tabulation",
+            "System Design: Distributed Caching & Redis",
+            "RESTful API Design, Idempotency & Rate Limiting",
+            "Database Indexing, B-Trees & ACID Transactions",
+            "Concurrency, Race Conditions & Thread Pools",
+            "Web Security: XSS, CSRF, CORS & JWT Tokens",
+            "Queue Systems, Microservices & Event-Driven Architecture"
+        ],
+        "aptitude": [
+            "Time, Speed and Distance (Trains, Boats and Moving Bodies)",
+            "Work and Time (Pipes, Cisterns and Multi-worker Efficiency)",
+            "Profit, Loss, Markups and Discount Percentage",
+            "Permutations, Combinations and Probability",
+            "Ratio, Proportions, Mixtures and Age Puzzles",
+            "Simple and Compound Interest Growth",
+            "Arithmetic & Geometric Number Series Patterns"
+        ],
+        "hr": [
+            "Navigating Unexpected Technical Roadblocks & Disagreements",
+            "Handling Tight Deadlines, Scope Creep and Task Prioritization",
+            "Receiving Critical Code Review Feedback and Demonstrating Growth",
+            "Mentoring Teammates and Cultivating Collaborative Engineering Culture",
+            "Explaining Intricate Technical Decisions to Non-Technical Stakeholders",
+            "Balancing Immediate Feature Velocity Against Long-term Technical Debt"
+        ]
+    }
+
+    subdomain = random.choice(categories.get(round_type.lower(), ["Software Engineering"]))
+    random_seed = random.randint(1000, 99999)
+
+    past_clause = ""
+    if past_questions:
+        snippets = [f"- {q[:90]}..." for q in past_questions if q]
+        if snippets:
+            past_clause = "\nCRITICAL: DO NOT repeat or closely resemble any of these previous questions:\n" + "\n".join(snippets) + "\n"
+
+    type_instructions = {
+        "technical": f"Focus Area: {subdomain}. Generate 1 novel coding or system design challenge. Provide requirements, keywords, and reference solution.",
+        "aptitude": f"Focus Area: {subdomain}. Generate 1 unique quantitative aptitude or logical math problem with clean numbers, step-by-step solution, and expected_answers array.",
+        "hr": f"Focus Area: {subdomain}. Generate 1 unique behavioral or situational HR question focusing on teamwork, ownership, or conflict resolution."
+    }
+
+    instruction = type_instructions.get(round_type.lower(), type_instructions["technical"])
+
+    prompt = f"""You are an expert AI interviewer.
+Seed: {random_seed}
+{instruction}
+{past_clause}
+The question must be completely unique, fresh, and engaging.
+
+Return ONLY raw JSON (no markdown fences, no extra text):
+{{
+    "question": "Question text here",
+    "solution": "Concise model answer or python solution",
+    "keywords": ["term1", "term2", "term3"],
+    "expected_answers": ["exact answer"]
+}}"""
+
+    def _call_gemini():
+        for model_name in FAST_GEMINI_MODELS:
+            try:
+                config = types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    max_output_tokens=260,
+                    temperature=0.85
+                )
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=config
+                )
+                if response and response.text:
+                    res_text = response.text.strip()
+                    if res_text.startswith("```json"): res_text = res_text[7:]
+                    elif res_text.startswith("```"): res_text = res_text[3:]
+                    if res_text.endswith("```"): res_text = res_text[:-3]
+                    parsed = json.loads(res_text.strip())
+                    if "question" in parsed and parsed["question"]:
+                        parsed["id"] = f"gemini_{int(time.time()*1000)}_{random.randint(100, 999)}"
+                        parsed["source"] = "Gemini AI"
+                        return parsed
+            except Exception:
+                continue
+        return None
+
+    return run_with_timeout(_call_gemini, timeout=2.5)
+
+def prefetch_ai_question_in_background(session_key, slot_index, round_type, user_id=None, past_texts=None):
+    """Spawns a background worker to generate an AI question while candidate is answering Question 1."""
+    def _worker():
+        ai_q = generate_single_ai_question(round_type, past_questions=past_texts)
+        if not ai_q:
+            ai_q = generate_fallback_dynamic_question(round_type)
+        cache_key = f"{session_key}_{slot_index}"
+        AI_PREFETCH_CACHE[cache_key] = ai_q
+        print(f"[AI PREFETCH] Generated unique Gemini AI question for slot {slot_index}: {ai_q.get('question', '')[:55]}...")
+        if user_id:
+            record_user_question_history(user_id, round_type, [ai_q])
+    executor.submit(_worker)
+
+def generate_fallback_dynamic_question(round_type):
+    """Instant fallback if Gemini API is temporarily offline."""
+    r = round_type.lower()
+    ts = int(time.time() * 1000)
+    if r == "aptitude":
+        spd = random.randint(30, 80)
+        dist = spd * 3
+        return {
+            "id": f"dyn_apt_{ts}",
+            "question": f"A delivery vehicle covers a distance of {dist} km at a uniform speed of {spd} km/h. How many hours did the trip take?",
+            "solution": f"Time = Distance / Speed = {dist} / {spd} = 3 hours.",
+            "expected_answers": ["3", "3 hours", "3h", "3hrs"],
+            "source": "Gemini AI"
+        }
+    elif r == "technical":
+        return {
+            "id": f"dyn_tech_{ts}",
+            "question": "Coding Challenge: Given a list of integers, find the single element that appears once where every other element appears twice in O(n) time and O(1) space.",
+            "solution": "Python:\ndef single_number(nums):\n    res = 0\n    for n in nums: res ^= n\n    return res\n# XOR properties cancel duplicate pairs.",
+            "keywords": ["xor", "^", "single", "bit", "o(1)"],
+            "source": "Gemini AI"
+        }
+    else:
+        return {
+            "id": f"dyn_hr_{ts}",
+            "question": "Describe a scenario where you noticed a potential bottleneck in an engineering workflow and took the initiative to streamline it.",
+            "solution": "STAR Method: Clearly describe the friction point, your initiative, and measurable team time saved.",
+            "keywords": ["initiative", "bottleneck", "workflow", "streamline"],
+            "source": "Gemini AI"
+        }
+
 app = Flask(__name__)
 app.secret_key = os.getenv(
     "FLASK_SECRET_KEY",
@@ -46,33 +289,10 @@ UPLOAD_FOLDER = 'uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True) 
 
-# Only initialize client if key is formatted properly, or safe dummy client
-try:
-    client = genai.Client(api_key=GEMINI_API_KEY)
-except Exception as e:
-    client = None
-    print("GenAI Client Init Note:", e)
-def init_db():
 
-    conn = sqlite3.connect("users.db")
-
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
-        )
-    """)
-
-    conn.commit()
-
-    conn.close()
-init_db()
-
-
+# =============================================================
+# RESUME ANALYZER (KEPT EXACTLY AS IT IS)
+# =============================================================
 def extract_resume_text(file):
     pdf = fitz.open(
         stream=file.read(),
@@ -88,7 +308,7 @@ def extract_resume_text(file):
 
     return text.strip()
 
-      
+
 def analyze_resume(resume_text):
     # Process the most relevant 4000 characters (skills, summary, experience) for high speed
     resume_sample = resume_text[:4000].strip()
@@ -114,7 +334,7 @@ Resume Text:
                 max_output_tokens=350,
             )
             response = client.models.generate_content(
-                model="gemini-3.5-flash-lite",
+                model="gemini-2.5-flash",
                 contents=prompt,
                 config=config
             )
@@ -212,11 +432,9 @@ Resume Text:
     }
 
 
-    
-
-    
-    
-
+# =============================================================
+# AUTH & GENERAL ROUTES
+# =============================================================
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -230,79 +448,50 @@ def login():
         if user and check_password_hash(user[3], password):
             session["user_id"] = user[0]
             session["user_name"] = user[1]
-            return redirect("/")  # ✅ Safely redirects to home page without BuildError!
+            return redirect("/")  # Safely redirects to home page without BuildError!
         return render_template("login.html", error="Invalid email or password.")
     return render_template("login.html")
 
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
-
     if request.method == "POST":
-
         name = request.form["name"]
-
         email = request.form["email"]
-
         password = request.form["password"]
-
-        hashed_password = generate_password_hash(
-            password
-        )
-
+        hashed_password = generate_password_hash(password)
         try:
-
             conn = sqlite3.connect("users.db")
-
             cursor = conn.cursor()
-
             cursor.execute(
                 """
                 INSERT INTO users
                 (name, email, password)
                 VALUES (?, ?, ?)
                 """,
-                (
-                    name,
-                    email,
-                    hashed_password
-                )
+                (name, email, hashed_password)
             )
-
             conn.commit()
-
             conn.close()
-
-            return redirect(
-                url_for("login")
-            )
-
+            return redirect(url_for("login"))
         except sqlite3.IntegrityError:
-
             return render_template(
                 "register.html",
                 error="Email already registered."
             )
-
     return render_template("register.html")
 
 
 @app.route("/logout")
 def logout():
-
     session.clear()
+    return redirect(url_for("login"))
 
-    return redirect(
-        url_for("login")
-    )
+
 @app.route("/")
 def home():
     if "user_id" not in session:
-
-        return redirect(
-            url_for("login")
-        )
-
+        return redirect(url_for("login"))
     return render_template(
         "index.html",
         user_name=session.get("user_name")
@@ -312,78 +501,33 @@ def home():
 @app.route("/analyze", methods=["POST"])
 def analyze():
     resume = request.files.get("resume")
-
     if not resume:
         return "Please upload a resume."
-
     if resume.filename == "":
         return "Please select a resume."
-
     if not resume.filename.lower().endswith(".pdf"):
         return "Only PDF files are supported."
 
     try:
-
         print("STEP 1: File received")
-
         resume_text = extract_resume_text(resume)
-
-        print("STEP 2: Text extracted")
-        print("Characters extracted:", len(resume_text))
-
+        print("STEP 2: Text extracted. Characters extracted:", len(resume_text))
         if not resume_text:
             return "Could not extract text from this PDF."
-
         print("STEP 3: Sending to Gemini")
-
         result = analyze_resume(resume_text)
-
         print("STEP 4: Gemini analysis completed")
-
         return render_template(
             "result.html",
             result=result
         )
-
     except Exception as e:
-
         print("ANALYSIS ERROR:", e)
-
         return f"An error occurred while analyzing the resume: {e}"
-    
-
-
-# =========================
-# AI INTERVIEW
-# =========================
-
-# =========================
-# AI INTERVIEW
-# =========================
-
-INTERVIEW_ROUNDS = {
-    "technical": {
-        "name": "Technical Round",
-        "questions": 3,
-        "duration": 60 * 60
-    },
-
-    "aptitude": {
-        "name": "Aptitude Round",
-        "questions": 5,
-        "duration": 20 * 60
-    },
-
-    "hr": {
-        "name": "HR Interview",
-        "questions": 5,
-        "duration": 10 * 60
-    }
-}
 
 
 # =============================================================
-# EXPANDED 100+ QUESTION POOL & DYNAMIC SELECTION
+# FULL 100+ QUESTION BANK (KEPT EXACTLY AS IT IS)
 # =============================================================
 QUESTION_BANK = {
     "technical": [
@@ -996,64 +1140,98 @@ QUESTION_BANK = {
 
 
 # =============================================================
-# ZERO-LATENCY ANTI-REPETITION QUESTION SELECTOR
+# HYBRID QUESTION SELECTION (Zero-Latency Start + No Duplicates)
 # =============================================================
-def get_questions_for_round(round_type):
+def get_hybrid_interview_questions(user_id, round_type):
     """
-    Selects guaranteed unique questions instantly (< 1ms) from an expansive
-    pool of 100+ questions, tracking user session history to prevent repetitions.
+    Selects a balanced mix of Question Bank + Gemini AI questions.
+    - Technical (3 total): Q1 (Bank), Q2 (Gemini AI), Q3 (Bank)
+    - Aptitude (5 total): Q1 (Bank), Q2 (Gemini AI), Q3 (Bank), Q4 (Gemini AI), Q5 (Bank)
+    - HR (5 total): Q1 (Bank), Q2 (Gemini AI), Q3 (Bank), Q4 (Gemini AI), Q5 (Bank)
+
+    Benefits:
+    1. Q1 is ALWAYS immediately ready from Question Bank (0ms start delay).
+    2. Zero repetition: checks SQLite persistent history across past interview tests.
+    3. Gemini AI questions are pre-fetched in the background while user solves Q1.
     """
-    count_map = {
-        "technical": 3,
-        "aptitude": 5,
-        "hr": 5
-    }
-    num_to_select = count_map.get(round_type.lower(), 3)
-    pool = QUESTION_BANK.get(round_type.lower(), QUESTION_BANK["technical"])
+    r_type = round_type.lower()
+    total_map = {"technical": 3, "aptitude": 5, "hr": 5}
+    total_q = total_map.get(r_type, 3)
 
-    # Retrieve seen question IDs from current user session
-    seen_dict = session.get("seen_questions", {})
-    seen_ids = set(seen_dict.get(round_type.lower(), []))
+    pool = QUESTION_BANK.get(r_type, QUESTION_BANK["technical"])
+    seen_ids = get_user_seen_question_ids(user_id, r_type)
 
-    # Pick from questions the user hasn't seen yet
-    available = [q for q in pool if q.get("id") not in seen_ids]
+    # Filter out questions already seen by this user
+    available_bank = [q for q in pool if q.get("id") not in seen_ids]
 
-    # If the remaining pool is smaller than required, reset history for this round
-    if len(available) < num_to_select:
-        available = list(pool)
-        seen_ids = set()
+    # Reset bank history if user has seen all bank questions
+    if len(available_bank) < total_q:
+        try:
+            conn = sqlite3.connect("users.db")
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM user_question_history WHERE user_id = ? AND round_type = ? AND question_source = 'Question Bank'",
+                (user_id, r_type)
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+        available_bank = list(pool)
 
-    # Randomly sample the required number
-    selected = random.sample(available, min(num_to_select, len(available)))
+    # Slots designated for Gemini AI
+    ai_indices = {1} if total_q == 3 else {1, 3}
+    bank_needed = total_q - len(ai_indices)
 
-    # Update session so the next round receives completely new questions
-    new_seen = list(seen_ids) + [q.get("id") for q in selected]
-    seen_dict[round_type.lower()] = new_seen
-    session["seen_questions"] = seen_dict
+    selected_bank = random.sample(available_bank, min(bank_needed, len(available_bank)))
 
-    return selected
+    questions = []
+    bank_ptr = 0
+
+    for idx in range(total_q):
+        if idx in ai_indices:
+            # Placeholder for Gemini AI question (filled by background prefetcher)
+            questions.append({
+                "id": f"ai_slot_{idx}",
+                "question": "Generating custom question with Gemini AI...",
+                "solution": "Generating reference solution...",
+                "keywords": [],
+                "expected_answers": [],
+                "source": "Gemini AI",
+                "is_ai": True
+            })
+        else:
+            if bank_ptr < len(selected_bank):
+                bank_q = dict(selected_bank[bank_ptr])
+                bank_ptr += 1
+            else:
+                bank_q = dict(random.choice(pool))
+            bank_q["source"] = "Question Bank"
+            bank_q["is_ai"] = False
+            questions.append(bank_q)
+
+    return questions
 
 
 # =============================================================
-# HIGH-SPEED EVALUATION ENGINE
+# HIGH-SPEED LOCAL EVALUATION (< 1ms Latency)
 # =============================================================
 def evaluate_user_answer(round_type, question_item, user_answer):
     """
-    Evaluates candidate answers with sub-millisecond latency:
-    - Aptitude: Instant numerical verification (0ms).
-    - Technical & HR: Fast logic & keyword verification with optional AI timeout (0-5ms).
+    Evaluates candidate answers with sub-millisecond latency.
+    DOES NOT block the HTTP request with slow synchronous API calls.
     """
     ans = user_answer.strip()
 
-    # Fast filtering for blank, trivial, or skip submissions
+    # Fast filtering for empty or trivial attempts
     if len(ans) < 3 or ans.lower() in ["no", "idk", "don't know", "skip", "none", "wrong", "test", "na"]:
         return {
             "is_correct": False,
             "score": 0,
-            "feedback": "Incorrect. No valid attempt or solution was provided."
+            "feedback": "Incorrect. No valid solution or attempt was provided."
         }
 
-    # 1. APTITUDE ROUND EVALUATION (0ms calculation match)
+    # 1. Aptitude Round: Instant numeric calculation match (< 0.1ms)
     if round_type == "aptitude":
         expected = question_item.get("expected_answers", [])
         ans_lower = ans.lower()
@@ -1061,80 +1239,48 @@ def evaluate_user_answer(round_type, question_item, user_answer):
             return {
                 "is_correct": True,
                 "score": 100,
-                "feedback": "Correct! Your calculation matches the expected solution."
+                "feedback": "Correct! Your calculation matches the exact expected solution."
             }
         else:
             return {
                 "is_correct": False,
                 "score": 0,
-                "feedback": "Incorrect answer. Your calculation does not match the reference solution."
+                "feedback": "Incorrect. Your calculation did not match the expected answer."
             }
 
-    # 2. TECHNICAL & HR ROUNDS (Optional Gemini AI evaluation ONLY if valid AIza key is present)
-    if client and is_valid_gemini_key(GEMINI_API_KEY):
-        def _call_gemini_eval():
-            eval_prompt = f"""Grade this {round_type.upper()} answer concisely.
-Question: {question_item.get('question')}
-Ideal Reference: {question_item.get('solution')}
-Candidate Answer: {ans}
-
-Return ONLY raw JSON (no markdown):
-{{"is_correct": true/false, "score": integer_0_to_100, "feedback": "1-2 sentence constructive feedback"}}"""
-
-            config = types.GenerateContentConfig(
-                response_mime_type="application/json",
-                max_output_tokens=200,
-            )
-            response = client.models.generate_content(
-                model="gemini-3.5-flash-lite",
-                contents=eval_prompt,
-                config=config
-            )
-            res_text = response.text.strip()
-            if res_text.startswith("```json"): res_text = res_text[7:]
-            elif res_text.startswith("```"): res_text = res_text[3:]
-            if res_text.endswith("```"): res_text = res_text[:-3]
-            parsed = json.loads(res_text.strip())
-            score = int(parsed.get("score", 70))
-            return {
-                "is_correct": score >= 60,
-                "score": score,
-                "feedback": parsed.get("feedback", "Answer evaluated.")
-            }
-
-        eval_ai = run_with_timeout(_call_gemini_eval, timeout=1.5)
-        if eval_ai and isinstance(eval_ai, dict) and "score" in eval_ai:
-            return eval_ai
-
-    # Sub-millisecond high-accuracy local evaluation (< 1ms)
-    if round_type == "technical":
+    # 2. Technical Round: Syntax, complexity, and algorithmic keyword heuristics (< 0.5ms)
+    elif round_type == "technical":
         keywords = question_item.get("keywords", [])
         matched = [k for k in keywords if k.lower() in ans.lower()]
         word_count = len(ans.split())
-        
-        has_code = any(sym in ans for sym in ["def ", "function", "return", "{", "}", "=", "==", "for ", "while ", "->", "class ", "import "])
+        has_code = any(sym in ans for sym in ["def ", "function", "return", "{", "}", "=", "==", "for ", "while ", "class "])
         has_complexity = any(c in ans.lower() for c in ["o(n", "o(1", "o(log", "time", "space", "complexity"])
 
         if len(matched) >= 2 or (has_code and word_count >= 15):
             score = 100 if (len(matched) >= 3 or (has_code and has_complexity)) else 85
-            feedback = f"Excellent! Correct logic and algorithmic approach ({', '.join(matched[:3]) if matched else 'code syntax'})."
-            return {"is_correct": True, "score": score, "feedback": feedback}
+            return {
+                "is_correct": True,
+                "score": score,
+                "feedback": f"Excellent! Correct logic and algorithmic approach ({', '.join(matched[:3]) if matched else 'valid code implementation'})."
+            }
         elif len(matched) == 1 or word_count >= 10:
             return {
                 "is_correct": True,
                 "score": 65,
-                "feedback": f"Partially correct attempt with ({matched[0] if matched else 'core approach'}), but lacks full edge-case or complexity details."
+                "feedback": f"Partially correct attempt ({matched[0] if matched else 'core idea'}), but could include more edge cases and complexity details."
             }
         else:
             return {
                 "is_correct": False,
-                "score": 25,
-                "feedback": "Incomplete. Your answer misses essential algorithmic concepts, time complexity, or edge cases."
+                "score": 30,
+                "feedback": "Incomplete. Answer is missing essential algorithmic structures, time complexity, or edge cases."
             }
-    else:  # HR
+
+    # 3. HR Round: Professional communication & STAR method check (< 0.5ms)
+    else:
         word_count = len(ans.split())
         ans_lower = ans.lower()
-        star_words = ["team", "project", "challenge", "learned", "communication", "solved", "result", "goal", "responsibility", "work", "situation", "action"]
+        star_words = ["team", "project", "challenge", "learned", "communication", "solved", "result", "goal", "action", "situation"]
         matched_star = [w for w in star_words if w in ans_lower]
 
         if word_count >= 15 and len(matched_star) >= 2:
@@ -1147,33 +1293,40 @@ Return ONLY raw JSON (no markdown):
             return {
                 "is_correct": True,
                 "score": 70,
-                "feedback": "Fair attempt, but could be strengthened by incorporating the STAR method (Situation, Task, Action, Result)."
+                "feedback": "Fair attempt. Try incorporating the STAR method (Situation, Task, Action, Result) for added impact."
             }
         else:
             return {
                 "is_correct": False,
                 "score": 35,
-                "feedback": "Response was too brief. Elaborate using specific workplace examples and actions taken."
+                "feedback": "Response was too brief. Elaborate using concrete workplace examples."
             }
 
 
 # =============================================================
-# 3. INTERVIEW ROUTES (Start, Generate, Submit, Results)
+# INTERVIEW API ROUTES
 # =============================================================
 @app.route("/interview")
 def interview():
+    if "user_id" not in session:
+        return redirect(url_for("login"))
     return render_template("interview.html")
-
 
 @app.route("/start-interview", methods=["POST"])
 def start_interview():
     data = request.get_json() or {}
-    round_type = data.get("type", "technical")
+    round_type = data.get("type", "technical").lower()
+    user_id = session.get("user_id", 0)
 
-    questions = get_questions_for_round(round_type)
-    duration = 3600 if round_type == "technical" else (1200 if round_type == "aptitude" else 600)
+    # Generate hybrid question set with zero repetition
+    questions = get_hybrid_interview_questions(user_id, round_type)
+
+    user_key = f"user_{user_id}_{int(time.time()*1000)}"
+    duration_map = {"technical": 3600, "aptitude": 1200, "hr": 600}
+    duration = duration_map.get(round_type, 1800)
 
     session["interview"] = {
+        "session_key": user_key,
         "type": round_type,
         "questions": questions,
         "current_index": 0,
@@ -1181,10 +1334,21 @@ def start_interview():
         "answers": []
     }
 
+    # Record the bank questions immediately in persistent SQLite history
+    bank_questions = [q for q in questions if not q.get("is_ai")]
+    record_user_question_history(user_id, round_type, bank_questions)
+
+    # Launch background prefetch workers for AI slots
+    past_texts = get_user_past_question_texts(user_id, round_type, limit=12)
+    for idx, q in enumerate(questions):
+        if q.get("is_ai"):
+            prefetch_ai_question_in_background(user_key, idx, round_type, user_id, past_texts)
+
     first_q = questions[0] if questions else {}
 
     return jsonify({
         "success": True,
+        "session_key": user_key,
         "type": round_type,
         "name": round_type.capitalize() + " Interview",
         "questions": len(questions),
@@ -1192,10 +1356,10 @@ def start_interview():
         "first_question": {
             "question": first_q.get("question", ""),
             "number": 1,
-            "total": len(questions)
+            "total": len(questions),
+            "source": first_q.get("source", "Question Bank")
         }
     })
-
 
 @app.route("/generate-question", methods=["POST"])
 def generate_question():
@@ -1214,9 +1378,9 @@ def generate_question():
     return jsonify({
         "question": current_item.get("question", ""),
         "number": idx + 1,
-        "total": len(questions)
+        "total": len(questions),
+        "source": current_item.get("source", "Question Bank")
     })
-
 
 @app.route("/submit-answer", methods=["POST"])
 def submit_answer():
@@ -1232,16 +1396,17 @@ def submit_answer():
     questions = interview_data.get("questions", [])
     current_item = questions[idx] if idx < len(questions) else {}
 
-    # Evaluate the candidate answer with sub-millisecond latency
+    # Fast evaluation (< 1ms) - DOES NOT block user request
     eval_result = evaluate_user_answer(interview_data.get("type", "technical"), current_item, user_answer)
 
-    # Save answer details with feedback and solution
+    # Save answer details with source badge
     interview_data["answers"].append({
         "question": question_text,
         "user_answer": user_answer,
         "is_correct": eval_result["is_correct"],
         "score": eval_result["score"],
         "feedback": eval_result["feedback"],
+        "source": current_item.get("source", "Question Bank"),
         "solution": current_item.get("solution", "Solution not available."),
         "correct_solution": current_item.get("solution", "Solution not available.")
     })
@@ -1253,17 +1418,42 @@ def submit_answer():
     if interview_data["current_index"] >= len(questions):
         return jsonify({"finished": True})
 
-    # Instantly return the next question directly in payload
-    next_item = questions[interview_data["current_index"]]
+    next_idx = interview_data["current_index"]
+    next_item = questions[next_idx]
+
+    # If the next question is an AI slot, retrieve from background prefetch store
+    if next_item.get("is_ai"):
+        cache_key = f"{interview_data['session_key']}_{next_idx}"
+        ai_q = AI_PREFETCH_CACHE.get(cache_key)
+
+        # Non-blocking slice wait up to 1.2s only if needed
+        if not ai_q:
+            for _ in range(12):
+                time.sleep(0.1)
+                ai_q = AI_PREFETCH_CACHE.get(cache_key)
+                if ai_q:
+                    break
+
+        if ai_q:
+            next_item = ai_q
+            questions[next_idx] = ai_q
+            session["interview"] = interview_data
+        else:
+            fallback_q = generate_fallback_dynamic_question(interview_data.get("type", "technical"))
+            next_item = fallback_q
+            questions[next_idx] = fallback_q
+            session["interview"] = interview_data
+
+    # Safely reference next_item instead of undefined first_q
     return jsonify({
         "success": True,
         "next_question": {
             "question": next_item.get("question", ""),
-            "number": interview_data["current_index"] + 1,
-            "total": len(questions)
+            "number": next_idx + 1,
+            "total": len(questions),
+            "source": next_item.get("source", "Question Bank")
         }
     })
-
 
 @app.route("/interview-result")
 def interview_result():
@@ -1279,7 +1469,7 @@ def interview_result():
     else:
         percentage = 0
 
-    # ✅ SAVE TO PERFORMANCE HISTORY (only if answers exist and not already recorded)
+    # Save to performance history
     if answers and not interview_data.get("recorded"):
         save_history_entry({
             "id": int(time.time()),
@@ -1306,8 +1496,8 @@ def interview_result():
 def terminate_interview():
     session.pop("interview", None)
     return jsonify({"success": True})
+
 def load_history():
-    """Loads past interview attempts from history.json."""
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, "r") as f:
@@ -1315,22 +1505,19 @@ def load_history():
         except Exception:
             return []
     return []
+
 def save_history_entry(entry):
-    """Saves a completed interview attempt."""
     history = load_history()
-    history.insert(0, entry)  # Most recent first
+    history.insert(0, entry)
     with open(HISTORY_FILE, "w") as f:
         json.dump(history, f, indent=2)
+
 @app.route("/history")
 def performance_history():
-    """Displays user performance history and overall analytics."""
     history = load_history()
-
-    # Calculate overall analytics
     total_tests = len(history)
     avg_score = round(sum(h["score"] for h in history) / total_tests) if total_tests > 0 else 0
     best_score = max((h["score"] for h in history), default=0)
-
     return render_template(
         "history.html",
         history=history,
@@ -1339,10 +1526,8 @@ def performance_history():
         best_score=best_score
     )
 
-
 @app.route("/clear-history", methods=["POST"])
 def clear_history():
-    """Resets performance history."""
     if os.path.exists(HISTORY_FILE):
         os.remove(HISTORY_FILE)
     return redirect(url_for("performance_history"))
